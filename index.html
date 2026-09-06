@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.85.1/L.Control.Locate.min.css" />
     <link rel="stylesheet" href="./style.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Leaflet</title>
+    <title>Lost Woods</title>
 </head>
 <body>
 
@@ -15,11 +15,32 @@
 
     <div id="map"></div>
 
-    <dialog open>
-        <p id="message">Loading, please wait...</p>
-        <hr/>
+    <dialog class="welcome">
+        <h1>Lost Woods</h1>
+        <p>
+            It's easy to get lost in these woods, but careful observation can guide you on the safe path.
+            Wander too far, and you will get lost and have to start over.
+        </p>
+        <p>This adventure uses your device's GPS and audio. Press the "Start" button when ready.</p>
+        <hr />
         <div>
             <button id="start">Start</button>
+        </div>
+    </dialog>
+    <dialog class="playing" inert>
+        <p><span id="message"></span><span id="status"></span></p>
+    </dialog>
+    <dialog class="final">
+        <h1>Congratulations</h1>
+        <p>You can find the cache at:</p>
+        <textarea readonly>FINAL COORDINATES</textarea>
+    </dialog>
+    <dialog class="over">
+        <h1>Game Over</h1>
+        <p>Oh no! You got lost in the woods.</p>
+        <hr />
+        <div>
+            <button id="restart">Restart</button>
         </div>
     </dialog>
 
