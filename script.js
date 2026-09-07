@@ -10,26 +10,44 @@ const message = document.querySelector("#message");
 const status = document.querySelector("#status");
 
 const mp3 = fetch("res/35%20Lost%20Woods.mp3").then(res => res.arrayBuffer());
-let audioCtx;
+let audioCtx, audioGain, audioSource;
 
 
 const initialView = [-27.62, 153.16], initialZoom = 15;
 
 
 const startingPoint = [-27.66698615358153, 153.19394886528173];
-const finalPoint = [-27.668499435630004, 153.19502699184514];
+const finalPoint = [-27.66682221044028, 153.19215779521755];
 const path = [
     startingPoint,
     [-27.66752539730453, 153.193841528621],
     [-27.667684556810915, 153.19488476762743],
     [-27.667789138375777, 153.19496263197766],
     [-27.66789128843237, 153.19498676692794],
+    [-27.668501795901555, 153.1950298318408],
+    [-27.668544521107286, 153.19495738644747],
+    [-27.668722688517082, 153.1948608466463],
+    [-27.668824837701035, 153.1948608466463],
+    [-27.669064758400182, 153.19491186121306],
+    [-27.669318942606292, 153.1948796812794],
+    [-27.669858191254114, 153.1945632452643],
+    [-27.670411690402553, 153.19435139403384],
+    [-27.670409314875712, 153.19409931788627],
+    [-27.669832060323717, 153.19316878146907],
+    [-27.669373580255662, 153.1934959441287],
+    [-27.66698137584867, 153.19394378153987],
+    [-27.66686734692292, 153.19307224166786],
     finalPoint
 ];
 
-const radius = 20;
+const inRadius = 20;
+const outRadius = 40;
+const overRadius = 100;
+const gameOverTimeout = 30;
 
 let state = "initial";
+let waypoint = 0;
+let leftPathSince = null;
 
 
 let map = L.map('map').setView(initialView, initialZoom);
@@ -39,7 +57,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 }).addTo(map);
 
-L.circle(startingPoint, radius, { color: 'red' }).addTo(map);
+L.circle(startingPoint, inRadius, { color: 'red' }).addTo(map);
 
 // DEBUG
 if (true) {
@@ -47,12 +65,14 @@ if (true) {
 
     map.on("click", (e) => {
         console.log(`[${e.latlng.lat}, ${e.latlng.lng}]`);
+
+        map.fire("locationfound", { latlng: e.latlng });
     });
 }
 
 
 let lc = L.control.locate({
-    setView: "always",
+    setView: "untilPanOrZoom",
     flyTo: true,
     clickBehavior: { inView: 'setView', outOfView: 'inView', inViewNotFollowing: 'inView' },
     showPopup: false
@@ -65,15 +85,20 @@ welcome.showModal();
 
 
 map.on("locationfound", (e) => {
+    let player = turf.point([e.latlng.lng, e.latlng.lat]);
+    let start = turf.point(startingPoint.toReversed());
+    let finish = turf.point(finalPoint.toReversed());
+
     // GPS granted and working
     if (state == "walk-to-start") {
-        let distance = map.distance(e.latlng, startingPoint);
+        let distance = turf.distance(player, start, { units: "m" });
         status.textContent = `: ${distance.toFixed(0)}m`;
 
-        if (distance <= radius) {
+        if (distance <= inRadius) {
             // Player reached starting point
             startAudio();
             state = "playing";
+            waypoint = 0;
             message.textContent = "Find your way through Lost Woods without getting lost"
             status.textContent = "";
         }
@@ -81,21 +106,47 @@ map.on("locationfound", (e) => {
 
     // TODO: calculate distance to path, set audio volume, detect end game and game over
     if (state == "playing") {
-        let distance = map.distance(e.latlng, finalPoint);
+        // At each moment, only consider a slice of the path close to the current waypoint,
+        // so we can support paths that loop back on themselves while still guiding the player
+        // along the intended sequence of waypoints.
+        let pathSlice = [Math.max(0, waypoint - 3), waypoint + 5];
+        let currentPath = turf.lineString(path.slice(pathSlice[0], pathSlice[1]).map(p => p.toReversed()));
+        let nearestPoint = turf.nearestPointOnLine(currentPath, player, { units: "m" });
 
-        if (distance <= radius) {
-            // Player reached final point
-            stopAudio();
-            state = "final";
-            playing.close();
-            final.showModal();
+        waypoint = Math.max(waypoint, pathSlice[0] + nearestPoint.properties.segmentIndex);
+
+        setAudioVolume(nearestPoint.properties.pointDistance);
+        status.textContent = `: ${nearestPoint.properties.pointDistance.toFixed(0)}m`;
+
+        if (waypoint >= path.length - 3) {
+            // Only check for final when close to the last waypoint
+            let distance = turf.distance(player, finish, { units: "m" });
+
+            if (distance <= inRadius) {
+                // Player reached final point
+                stopAudio();
+                state = "final";
+                playing.close();
+                final.showModal();
+            }
         }
 
-        let turfPoint = turf.point([e.latlng.lng, e.latlng.lat]);
-        let turfPath = turf.lineString(path.map(p => p.toReversed()));
-        let nearestPoint = turf.nearestPointOnLine(turfPath, turfPoint, { units: "m" });
+        if (nearestPoint.properties.pointDistance <= outRadius) {
+            leftPathSince = null;
+        } else {
+            let now = Date.now();
+            if (leftPathSince == null) {
+                leftPathSince = now;
+            }
 
-        status.textContent = `: ${nearestPoint.properties.dist.toFixed(0)}m`;
+            if (nearestPoint.properties.pointDistance > overRadius || now - leftPathSince > gameOverTimeout * 1000) {
+                // Game over
+                stopAudio();
+                state = "over";
+                playing.close();
+                over.showModal();
+            }
+        }
     }
 });
 
@@ -108,21 +159,45 @@ startButton.addEventListener("click", () => {
     status.textContent = "";
 });
 
+restartButton.addEventListener("click", () => {
+    over.close();
+    playing.show();
+    state = "walk-to-start";
+    message.textContent = "Please walk to the starting position shown in red on the map";
+    status.textContent = "";
+});
+
 
 async function startAudio() {
     audioCtx = new AudioContext();
-    let source = audioCtx.createBufferSource();
+    audioGain = audioCtx.createGain();
+    audioSource = audioCtx.createBufferSource();
 
-    source.buffer = await audioCtx.decodeAudioData(await mp3);
-    source.connect(audioCtx.destination);
-    source.loop = true;
-    source.loopStart = 2.035;
-    source.loopEnd = 32.925;
+    let buffer = await mp3;
+    audioSource.buffer = await audioCtx.decodeAudioData(buffer.slice(0));
+    audioSource.loop = true;
+    audioSource.loopStart = 2.035;
+    audioSource.loopEnd = 32.925;
 
-    source.start();
+    audioGain.gain = 1;
+
+    audioSource.connect(audioGain);
+    audioGain.connect(audioCtx.destination);
+
+    audioSource.start();
 };
+
+async function setAudioVolume(distance) {
+    if (distance <= inRadius) {
+        audioGain.gain.exponentialRampToValueAtTime(1, audioCtx.currentTime + 1);
+    } else if (distance <= outRadius) {
+        let level = Math.pow(1 - (distance - inRadius) / (outRadius - inRadius), 2);
+        audioGain.gain.exponentialRampToValueAtTime(level, audioCtx.currentTime + 1);
+    } else {
+        audioGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1);
+    }
+}
 
 async function stopAudio() {
     await audioCtx.close();
-    audioCtx = null;
 }
