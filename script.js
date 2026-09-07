@@ -27,7 +27,7 @@ const path = [
     finalPoint
 ];
 
-const radius = 10;
+const radius = 20;
 
 let state = "initial";
 
@@ -90,6 +90,12 @@ map.on("locationfound", (e) => {
             playing.close();
             final.showModal();
         }
+
+        let turfPoint = turf.point([e.latlng.lng, e.latlng.lat]);
+        let turfPath = turf.lineString(path.map(p => p.toReversed()));
+        let nearestPoint = turf.nearestPointOnLine(turfPath, turfPoint, { units: "m" });
+
+        status.textContent = `: ${nearestPoint.properties.dist.toFixed(0)}m`;
     }
 });
 
