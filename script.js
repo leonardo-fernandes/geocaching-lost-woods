@@ -8,10 +8,14 @@ const restartButton = document.querySelector("button#restart");
 
 const message = document.querySelector("#message");
 const status = document.querySelector("#status");
+const visualizer = document.querySelector("#audio-visualizer");
 
-const audio = document.querySelector("audio");
+const iosAudio = document.querySelector("#ios-audio");
+
 const mp3 = fetch("res/35%20Lost%20Woods.mp3").then(res => res.arrayBuffer());
-let audioCtx, audioGain, audioSource;
+const finalMp3 = fetch("res/OOT_Secret.wav").then(res => res.arrayBuffer());
+const overMp3 = fetch("res/73 Game Over.mp3").then(res => res.arrayBuffer());
+let audioCtx, audioSource, audioGain, audioAnalyser, audioAnalyserData, finalSource, overSource;
 
 
 const initialView = [-27.62, 153.16], initialZoom = 15;
@@ -46,6 +50,8 @@ const outRadius = 40;
 const gameOverTimeout = 30;
 const gameAbortRadius = 200;
 
+const DEBUG = false;
+
 let state = "initial";
 let waypoint = 0;
 let leftPathSince = null;
@@ -60,14 +66,21 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 L.circle(startingPoint, inRadius, { color: 'red' }).addTo(map);
 
-// DEBUG
-if (true) {
-    L.polyline(path, { color: 'red' }).addTo(map);
 
+if (DEBUG) {
+    L.polyline(path, { color: 'red' }).addTo(map);
+}
+if (true) {
     map.on("click", (e) => {
         console.log(`[${e.latlng.lat}, ${e.latlng.lng}]`);
 
-        map.fire("locationfound", e);
+        let setView = lc.options.setView;
+        try {
+            lc.options.setView = false;
+            map.fire("locationfound", e);
+        } finally {
+            lc.options.setView = setView;
+        }
     });
 }
 
@@ -105,7 +118,6 @@ map.on("locationfound", (e) => {
         }
     }
 
-    // TODO: calculate distance to path, set audio volume, detect end game and game over
     if (state == "playing") {
         // At each moment, only consider a slice of the path close to the current waypoint,
         // so we can support paths that loop back on themselves while still guiding the player
@@ -117,7 +129,9 @@ map.on("locationfound", (e) => {
         waypoint = Math.max(waypoint, pathSlice[0] + nearestPoint.properties.segmentIndex);
 
         setAudioVolume(nearestPoint.properties.pointDistance);
-        status.textContent = `: ${nearestPoint.properties.pointDistance.toFixed(0)}m`;
+        if (DEBUG) {
+            status.textContent = `: ${nearestPoint.properties.pointDistance.toFixed(0)}m`;
+        }
 
         if (waypoint >= path.length - 3) {
             // Only check for final when close to the last waypoint
@@ -125,10 +139,10 @@ map.on("locationfound", (e) => {
 
             if (distance <= inRadius) {
                 // Player reached final point
-                stopAudio();
                 state = "final";
                 playing.close();
                 final.showModal();
+                stopAudio(state);
             }
         }
 
@@ -142,37 +156,31 @@ map.on("locationfound", (e) => {
 
             if (nearestPoint.properties.pointDistance > gameAbortRadius || now - leftPathSince > gameOverTimeout * 1000) {
                 // Game over
-                stopAudio();
                 state = "over";
                 playing.close();
                 over.showModal();
+                stopAudio(state);
             }
         }
     }
 });
 
 
-startButton.addEventListener("click", () => {
-    welcome.close();
+[startButton, restartButton].forEach(b => b.addEventListener("click", () => {
+    [welcome, over].forEach(d => d.close());
     playing.show();
     state = "walk-to-start";
     message.textContent = "Please walk to the starting position shown in red on the map";
     status.textContent = "";
-});
-
-restartButton.addEventListener("click", () => {
-    over.close();
-    playing.show();
-    state = "walk-to-start";
-    message.textContent = "Please walk to the starting position shown in red on the map";
-    status.textContent = "";
-});
+}));
 
 
 async function startAudio() {
     audioCtx = new AudioContext();
-    audioGain = audioCtx.createGain();
     audioSource = audioCtx.createBufferSource();
+    audioGain = audioCtx.createGain();
+    audioAnalyser = audioCtx.createAnalyser();
+    audioAnalyserData = new Float32Array(audioAnalyser.fftSize);
 
     let buffer = await mp3;
     audioSource.buffer = await audioCtx.decodeAudioData(buffer.slice(0));
@@ -183,26 +191,93 @@ async function startAudio() {
     audioGain.gain = 1;
 
     audioSource.connect(audioGain);
-    audioGain.connect(audioCtx.destination);
+    audioGain.connect(audioAnalyser);
+    audioAnalyser.connect(audioCtx.destination);
 
     audioSource.start();
 
-    audio.play();
+    iosAudio.play();
+
+    let finalBuffer = await finalMp3;
+    finalSource = audioCtx.createBufferSource();
+    finalSource.buffer = await audioCtx.decodeAudioData(finalBuffer.slice(0));
+    finalSource.connect(audioCtx.destination);
+
+    let overBuffer = await overMp3;
+    overSource = audioCtx.createBufferSource();
+    overSource.buffer = await audioCtx.decodeAudioData(overBuffer.slice(0));
+    overSource.connect(audioCtx.destination);
 };
 
 async function setAudioVolume(distance) {
+    let now = audioCtx.currentTime;
+    let then = now + 2;
+
+    audioGain.gain.cancelScheduledValues(now);
+    audioGain.gain.setValueAtTime(audioGain.gain.value, now);
+
     if (distance <= inRadius) {
-        audioGain.gain.exponentialRampToValueAtTime(1, audioCtx.currentTime + 1);
+        audioGain.gain.linearRampToValueAtTime(1, then);
     } else if (distance <= outRadius) {
         let level = Math.pow(1 - (distance - inRadius) / (outRadius - inRadius), 2);
-        audioGain.gain.exponentialRampToValueAtTime(level, audioCtx.currentTime + 1);
+        audioGain.gain.linearRampToValueAtTime(level, then);
     } else {
-        audioGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1);
+        audioGain.gain.linearRampToValueAtTime(0, then);
     }
 }
 
-async function stopAudio() {
-    await audioCtx.close();
+async function stopAudio(state) {
+    audioSource.stop();
 
-    audio.pause();
+    if (state == "final") {
+        finalSource.start();
+    } else if (state == "over") {
+        overSource.start();
+    }
 }
+
+
+function drawVisualizer() {
+    const w = visualizer.clientWidth, h = visualizer.clientHeight;
+    visualizer.width = w;
+    visualizer.height = h;
+
+    let ctx = visualizer.getContext("2d");
+
+    if (state == "playing") {
+        ctx.fillStyle = "#404040";
+        ctx.fillRect(0, 0, w, h);
+
+        if (audioAnalyser) {
+            audioAnalyser.getFloatTimeDomainData(audioAnalyserData);
+
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = "#b95cb9";
+            ctx.beginPath();
+
+            const step = w / audioAnalyserData.length;
+            let x = step;
+
+            ctx.moveTo(0, h / 2);
+
+            for (let i = 1; i < audioAnalyserData.length; i++) {
+                const amplify = 2.5;
+                const v = amplify * audioAnalyserData[i];
+                const y = (1 + v) * (h / 2);
+
+                ctx.lineTo(x, y);
+
+                x += step;
+            }
+
+            ctx.lineTo(w, h / 2);
+            ctx.stroke();
+        }
+    } else {
+        ctx.clearRect(0, 0, w, h);
+    }
+
+    requestAnimationFrame(drawVisualizer);
+}
+
+drawVisualizer();
