@@ -9,6 +9,7 @@ const restartButton = document.querySelector("button#restart");
 const message = document.querySelector("#message");
 const status = document.querySelector("#status");
 
+const audio = document.querySelector("audio");
 const mp3 = fetch("res/35%20Lost%20Woods.mp3").then(res => res.arrayBuffer());
 let audioCtx, audioGain, audioSource;
 
@@ -42,8 +43,8 @@ const path = [
 
 const inRadius = 20;
 const outRadius = 40;
-const overRadius = 100;
 const gameOverTimeout = 30;
+const gameAbortRadius = 200;
 
 let state = "initial";
 let waypoint = 0;
@@ -66,7 +67,7 @@ if (true) {
     map.on("click", (e) => {
         console.log(`[${e.latlng.lat}, ${e.latlng.lng}]`);
 
-        map.fire("locationfound", { latlng: e.latlng });
+        map.fire("locationfound", e);
     });
 }
 
@@ -139,7 +140,7 @@ map.on("locationfound", (e) => {
                 leftPathSince = now;
             }
 
-            if (nearestPoint.properties.pointDistance > overRadius || now - leftPathSince > gameOverTimeout * 1000) {
+            if (nearestPoint.properties.pointDistance > gameAbortRadius || now - leftPathSince > gameOverTimeout * 1000) {
                 // Game over
                 stopAudio();
                 state = "over";
@@ -185,6 +186,8 @@ async function startAudio() {
     audioGain.connect(audioCtx.destination);
 
     audioSource.start();
+
+    audio.play();
 };
 
 async function setAudioVolume(distance) {
@@ -200,4 +203,6 @@ async function setAudioVolume(distance) {
 
 async function stopAudio() {
     await audioCtx.close();
+
+    audio.pause();
 }
