@@ -46,9 +46,9 @@ dialog.playing[open] {
 
 dialog.playing canvas {
     height: 2em;
-    aspect-ratio: 1;
+    width: 2em;
     border-radius: 100%;
-    overflow: hidden;
+    overflow: clip;
 }
 
 textarea {
