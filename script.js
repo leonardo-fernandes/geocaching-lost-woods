@@ -166,8 +166,8 @@ map.on("locationfound", (e) => {
 });
 
 
-[startButton, restartButton].forEach(b => b.addEventListener("click", () => {
-    [welcome, over].forEach(d => d.close());
+startButton.addEventListener("click", () => {
+    welcome.close();
     playing.show();
 
     state = "walk-to-start";
@@ -176,7 +176,14 @@ map.on("locationfound", (e) => {
     status.textContent = "";
 
     lc.start();
-}));
+});
+
+restartButton.addEventListener("click", () => {
+    over.close();
+    welcome.showModal();
+
+    state = "initial";
+});
 
 
 document.addEventListener("visibilitychange", () => {
@@ -205,8 +212,6 @@ async function startAudio() {
     audioSource.loop = true;
     audioSource.loopStart = 2.035;
     audioSource.loopEnd = 32.925;
-
-    audioGain.gain = 1;
 
     audioSource.connect(audioGain);
     audioGain.connect(audioAnalyser);
