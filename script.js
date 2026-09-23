@@ -1,3 +1,5 @@
+"use strict";
+
 const welcome = document.querySelector("dialog.welcome");
 const playing = document.querySelector("dialog.playing");
 const final = document.querySelector("dialog.final");
@@ -70,7 +72,7 @@ L.circle(startingPoint, inRadius, { color: 'red' }).addTo(map);
 if (DEBUG) {
     L.polyline(path, { color: 'red' }).addTo(map);
 }
-if (true) {
+if (DEBUG) {
     map.on("click", (e) => {
         console.log(`[${e.latlng.lat}, ${e.latlng.lng}]`);
 
@@ -91,8 +93,6 @@ let lc = L.control.locate({
     clickBehavior: { inView: 'setView', outOfView: 'inView', inViewNotFollowing: 'inView' },
     showPopup: false
 }).addTo(map);
-
-lc.start();
 
 
 welcome.showModal();
@@ -142,7 +142,7 @@ map.on("locationfound", (e) => {
                 state = "final";
                 playing.close();
                 final.showModal();
-                stopAudio(state);
+                playFinalAudio();
             }
         }
 
@@ -159,7 +159,7 @@ map.on("locationfound", (e) => {
                 state = "over";
                 playing.close();
                 over.showModal();
-                stopAudio(state);
+                playOverAudio();
             }
         }
     }
@@ -169,14 +169,32 @@ map.on("locationfound", (e) => {
 [startButton, restartButton].forEach(b => b.addEventListener("click", () => {
     [welcome, over].forEach(d => d.close());
     playing.show();
+
     state = "walk-to-start";
+
     message.textContent = "Please walk to the starting position shown in red on the map";
     status.textContent = "";
+
+    lc.start();
 }));
 
 
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+        pauseAudio();
+    } else {
+        resumeAudio();
+    }
+});
+
+
 async function startAudio() {
-    audioCtx = new AudioContext();
+    if (!audioCtx) {
+        audioCtx = new AudioContext();
+
+        iosAudio.play();
+    }
+
     audioSource = audioCtx.createBufferSource();
     audioGain = audioCtx.createGain();
     audioAnalyser = audioCtx.createAnalyser();
@@ -194,10 +212,6 @@ async function startAudio() {
     audioGain.connect(audioAnalyser);
     audioAnalyser.connect(audioCtx.destination);
 
-    audioSource.start();
-
-    iosAudio.play();
-
     let finalBuffer = await finalMp3;
     finalSource = audioCtx.createBufferSource();
     finalSource.buffer = await audioCtx.decodeAudioData(finalBuffer.slice(0));
@@ -207,6 +221,8 @@ async function startAudio() {
     overSource = audioCtx.createBufferSource();
     overSource.buffer = await audioCtx.decodeAudioData(overBuffer.slice(0));
     overSource.connect(audioCtx.destination);
+
+    audioSource.start();
 };
 
 async function setAudioVolume(distance) {
@@ -226,14 +242,26 @@ async function setAudioVolume(distance) {
     }
 }
 
-async function stopAudio(state) {
-    audioSource.stop();
-
-    if (state == "final") {
-        finalSource.start();
-    } else if (state == "over") {
-        overSource.start();
+async function pauseAudio() {
+    if (audioCtx) {
+        await audioCtx.suspend();
     }
+}
+
+async function resumeAudio() {
+    if (audioCtx) {
+        await audioCtx.resume();
+    }
+}
+
+async function playFinalAudio() {
+    audioSource.stop();
+    finalSource.start();
+}
+
+async function playOverAudio() {
+    audioSource.stop();
+    overSource.start();
 }
 
 
